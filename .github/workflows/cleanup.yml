@@ -13,6 +13,12 @@ on:
   schedule:
     - cron: "30 3 * * *" # Daily at 03:30 UTC
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Only print which latest-*/stable-* versions would be deleted"
+        required: false
+        default: true
+        type: boolean
 
 env:
   IMAGE_NAME: dino
@@ -22,40 +28,35 @@ permissions:
   packages: read
 
 jobs:
-  cleanup-stable:
-    name: Cleanup stable-* versions
+  cleanup-streams:
+    name: Cleanup old latest-* and stable-* versions
+    # Age-based instead of count-based: actions/delete-package-versions matches
+    # ignore-versions against the version name, which for containers is the
+    # digest, not the tag, so it can't select versions by stream tag.
+    # Retention must stay above the stable promotion soak time (14 days), so
+    # the promotion candidate is never pruned first.
     runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: write
     steps:
-      # This action is not yet pinned to a commit SHA; Renovate will open an
-      # automerging "pin" PR to convert this to a digest, matching this repo's
-      # convention for other third-party actions.
-      - name: Delete old stable-* versions
-        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          package-name: ${{ env.IMAGE_NAME }}
-          package-type: container
-          min-versions-to-keep: 2
-          ignore-versions: "^(?!stable).*$"
-          token: ${{ secrets.PACKAGE_CLEANUP_TOKEN || secrets.GITHUB_TOKEN }}
+          persist-credentials: false
 
-  cleanup-latest:
-    name: Cleanup latest-* versions
-    runs-on: ubuntu-26.04
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Delete old latest-* versions
-        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5
-        with:
-          package-name: ${{ env.IMAGE_NAME }}
-          package-type: container
-          min-versions-to-keep: 2
-          ignore-versions: "^(?!latest).*$"
-          token: ${{ secrets.PACKAGE_CLEANUP_TOKEN || secrets.GITHUB_TOKEN }}
+      - name: Delete old latest-* and stable-* versions
+        env:
+          GH_TOKEN: ${{ secrets.PACKAGE_CLEANUP_TOKEN || secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RETENTION_DAYS: "28"
+          MIN_KEEP: "2"
+          # Scheduled runs delete; manual runs default to a dry run.
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          ORG="${REPO%%/*}"
+          export ORG="${ORG,,}" PACKAGE="${IMAGE_NAME,,}"
+          bash .github/scripts/prune-stream-versions.sh
 
   cleanup-untagged:
     name: Cleanup untagged manifests
