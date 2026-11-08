@@ -14,11 +14,11 @@ The image is published from a single Containerfile across several branch types. 
 
 | Branch | Base image | Published tag | Retention | Purpose |
 | --- | --- | --- | --- | --- |
-| `main` | `ghcr.io/ublue-os/aurora-dx:stable` (pinned) | `latest` | 2 images | Integration testing |
-| `stable` | `ghcr.io/ublue-os/aurora-dx:stable` (pinned) | `stable` | 2 images | Production (recommended) |
-| `feat/*`, `fix/*` | `ghcr.io/ublue-os/aurora-dx:stable` (pinned) | `feat-{name}`, `fix-{name}` | 1 image | Feature/fix testing |
+| `main` | `ghcr.io/ublue-os/aurora-dx:stable` (pinned) | `latest` | 28 days, at least 2 images | Integration testing |
+| `stable` | `ghcr.io/ublue-os/aurora-dx:stable` (pinned) | `stable` | 28 days, at least 2 images | Production (recommended) |
+| `feat/*`, `fix/*` | `ghcr.io/ublue-os/aurora-dx:stable` (pinned) | `feat-{name}`, `fix-{name}` | Until the branch is deleted | Feature/fix testing |
 
-Each build also gets dated/SHA tags (e.g. `stable-20260703-a1b2c3d`) for pinning/rollback. Old versions are pruned nightly by [`.github/workflows/cleanup.yml`](.github/workflows/cleanup.yml) according to the retention column above, plus removal of untagged manifests and `feat-*`/`fix-*` tags whose branch no longer exists.
+Each build also gets dated/SHA tags (e.g. `stable-20260703-a1b2c3d`) for pinning/rollback. Old versions are pruned nightly by [`.github/workflows/cleanup.yml`](.github/workflows/cleanup.yml) according to the retention column above; the image currently tagged `latest` or `stable` is never pruned, and each pruned image's cosign signature is removed with it. Untagged manifests and `feat-*`/`fix-*` versions whose branch no longer exists are removed as well.
 
 ## Installing / Switching to DINO
 
