@@ -13,6 +13,12 @@ on:
       - fix/*
     paths-ignore:
       - "**/README.md"
+  # Weekly rebuild of main (schedules always run on the default branch), so
+  # `latest` gets at least one new image per week even without commits. This
+  # also picks up updates of Edge, Prisma, OneDrive and Himmelblau, which
+  # Renovate doesn't track. The stable promotion (#93) relies on this cadence.
+  schedule:
+    - cron: "0 4 * * 1" # Mondays 04:00 UTC
   workflow_dispatch:
 
 permissions:
