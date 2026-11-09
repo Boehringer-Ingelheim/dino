@@ -1,0 +1,8 @@
+# Units that may be failed in the smoke-test VM without failing the test,
+# one unit name per line. Only list units that fail because of the test
+# environment (no TPM, no real network login, ...), with a reason.
+
+# The VM gets the runner's CPU (-cpu host); on AMD runners mcelog exits with
+# "mcelog does not support this processor" (AMD uses edac_mce_amd instead).
+# Comes from the aurora base image; real AMD laptops show the same.
+mcelog.service
