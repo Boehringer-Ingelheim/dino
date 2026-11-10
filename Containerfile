@@ -1,7 +1,7 @@
 # Base image tag/digest is injected by CI based on the branch (main/latest/stable/feat/*).
 # The default below is used for local builds when BASE_IMAGE is not overridden.
 # This ARG must be declared before the first FROM to be usable in the FROM below.
-ARG BASE_IMAGE=ghcr.io/ublue-os/aurora-dx:stable@sha256:d5cc6e0da34b85b24da3054783d862169ebf1ff01f4fa2e3e2e2060e32ac8835
+ARG BASE_IMAGE=ghcr.io/ublue-os/aurora-dx:stable@sha256:248bca1ee773ff1a01efafde5cee60c3e4d6fa17f5629b2c0eb84312a2ae38b4
 
 # Allow build scripts to be referenced without being copied into the final image
 FROM scratch AS ctx
