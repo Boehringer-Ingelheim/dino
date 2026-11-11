@@ -8,8 +8,9 @@
 #   - it does not carry the floating `latest` or `stable` tag
 #   - it is not among the MIN_KEEP newest versions of any stream it belongs to
 #     (a promoted image carries both latest-* and stable-* tags)
-# The cosign signature version (tag sha256-<digest>.sig) of each deleted image
-# is deleted with it, so signatures don't pile up as orphans.
+# The cosign signature and attestation versions (tags sha256-<digest>.sig and
+# .att) of each deleted image are deleted with it, so they don't pile up as
+# orphans.
 #
 # RETENTION_DAYS must stay above the stable promotion soak time (#93), so the
 # promotion candidate is never pruned before it can be promoted.
@@ -60,11 +61,13 @@ to_delete=$(jq -c --arg cutoff "${cutoff}" --argjson min "${MIN_KEEP}" '
       | select(.id as $id | $keep_newest | any(. == $id) | not)]
     as $images
 
-  # Attach the signature version(s) of each image, so they are deleted together.
+  # Attach the signature and attestation version(s) of each image, so they are
+  # deleted together.
   | $images
-  | map((.name | sub("^sha256:"; "sha256-") + ".sig") as $sig_tag
+  | map((.name | sub("^sha256:"; "sha256-")) as $prefix
+      | [$prefix + ".sig", $prefix + ".att"] as $sig_tags
       | {id, created_at, tags: (tags | join(",")),
-         sig_ids: ([$all[] | select(tags | any(. == $sig_tag)) | .id] | join(","))})
+         sig_ids: ([$all[] | select(tags | any(. as $t | $sig_tags | index($t))) | .id] | join(","))})
 ' <<<"${versions}")
 
 count=$(jq 'length' <<<"${to_delete}")

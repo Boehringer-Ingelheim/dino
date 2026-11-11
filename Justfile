@@ -410,6 +410,11 @@ run-vm-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_run-
 [group('Run Virtal Machine')]
 run-vm-iso $target_image=("localhost/" + image_name) $tag=default_tag: && (_run-vm target_image tag "iso" "disk_config/iso.toml")
 
+# Boot an image headless in QEMU/KVM and run the smoke test (tests/smoke/)
+[group('Run Virtal Machine')]
+smoke-test $target_image=("localhost/" + image_name) $tag=default_tag: (_rootful_load_image target_image tag)
+    sudo bash tests/smoke/run.sh "${target_image}:${tag}"
+
 # Run a virtual machine using systemd-vmspawn
 [group('Run Virtal Machine')]
 spawn-vm rebuild="0" type="qcow2" ram="6G":

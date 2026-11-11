@@ -20,7 +20,7 @@ The image is published from a single Containerfile across several branch types. 
 
 `main` also rebuilds every Monday at 04:00 UTC, so `latest` gets a new image at least weekly even without commits (this also picks up Edge, Prisma, OneDrive and Himmelblau updates).
 
-Each build also gets dated/SHA tags (e.g. `stable-20260703-a1b2c3d`) for pinning/rollback. Old versions are pruned nightly by [`.github/workflows/cleanup.yml`](.github/workflows/cleanup.yml) according to the retention column above; the image currently tagged `latest` or `stable` is never pruned, and each pruned image's cosign signature is removed with it. Untagged manifests and `feat-*`/`fix-*` versions whose branch no longer exists are removed as well.
+Each build also gets dated/SHA tags (e.g. `stable-20260703-a1b2c3d`) for pinning/rollback. Old versions are pruned nightly by [`.github/workflows/cleanup.yml`](.github/workflows/cleanup.yml) according to the retention column above; the image currently tagged `latest` or `stable` is never pruned, and each pruned image's cosign signature and attestation are removed with it. Untagged manifests and `feat-*`/`fix-*` versions whose branch no longer exists are removed as well.
 
 ## Installing / Switching to DINO
 
@@ -45,6 +45,7 @@ Reboot to complete the switch. All published images are signed with [cosign](htt
 - [`.github/workflows/build.yml`](.github/workflows/build.yml) resolves `STREAM_TAG` from the branch name (`resolve-stream` step) and passes it into `just build`, so the same workflow file drives every stream.
 - [`.github/renovate.json5`](.github/renovate.json5) tracks `main` and auto-merges `aurora-dx` digest bumps to the Containerfile every 6 hours; each merge triggers a new build.
 - Publishing (push/tag/sign) only happens on `push` events (not on pull requests), so PRs build and validate but never publish.
+- **Boot smoke test** ([`smoke-test.yml`](.github/workflows/smoke-test.yml), [`tests/smoke/`](tests/smoke)): for `latest` and `stable` (and manual runs), CI first pushes only the SHA tags. It then installs the new image to a qcow2, boots it headless in QEMU/KVM and checks that the boot finished without unexpected failed units, Himmelblau and GDM (with its greeter) are running, the corporate fonts are installed and every signature key in `policy.json` exists. Only if that passes are the floating tags (`latest`, `latest-YYYYMMDD`) moved to the new digest, and a signed attestation records the passed test. A failing image is never served to machines tracking the stream. `feat-*`/`fix-*` pushes skip the test. Run it locally with `just smoke-test` (needs sudo and KVM).
 
 ### Branch Promotion
 
@@ -91,6 +92,7 @@ Other useful commands:
 ```bash
 just build-qcow2      # Build a bootable QCOW2 VM image
 just build-iso        # Build a bootable ISO
+just smoke-test       # Boot the image headless and run the CI smoke checks
 just check            # Validate Justfile/*.just syntax
 just clean            # Remove local build artifacts
 ```
@@ -113,6 +115,7 @@ See [Building and testing an installer ISO locally](docs/local-installer-testing
 | [`system_files/`](system_files) | Files copied verbatim into the image (etc, usr, just commands) |
 | [`disk_config/`](disk_config) | bootc-image-builder configs for VM/ISO output |
 | [`.github/workflows/build.yml`](.github/workflows/build.yml) | Builds, tags, signs, and publishes per stream |
+| [`.github/workflows/smoke-test.yml`](.github/workflows/smoke-test.yml), [`tests/smoke/`](tests/smoke) | Boot smoke test that gates the floating stream tags |
 | [`.github/workflows/build-disk.yml`](.github/workflows/build-disk.yml) | Builds installable disk images |
 | [`.github/workflows/cleanup.yml`](.github/workflows/cleanup.yml) | Prunes old GHCR versions per stream retention policy |
 | [`.github/renovate.json5`](.github/renovate.json5) | Automerges base-image digest bumps across streams |
