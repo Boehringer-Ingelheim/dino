@@ -65,10 +65,20 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      # The runner's Ubuntu mirrors occasionally fail to resolve for a minute
+      # or two; retry instead of failing an otherwise good build.
       - name: Install QEMU
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils ovmf swtpm
+          for attempt in 1 2 3 4; do
+            if sudo apt-get -o Acquire::Retries=3 update &&
+              sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
+                qemu-system-x86 qemu-utils ovmf swtpm; then
+              exit 0
+            fi
+            echo "::warning::apt failed (attempt ${attempt}), retrying in 60s"
+            sleep 60
+          done
+          exit 1
 
       # Ubuntu confines every /usr/bin/bwrap with the unpriv_bwrap AppArmor
       # profile, also inside privileged containers. That blocks the mounts
