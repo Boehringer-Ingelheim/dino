@@ -224,10 +224,12 @@ avoids that.
    affected machines have picked up at least one update carrying the
    rotated policy — otherwise a machine that hasn't updated yet could
    momentarily lose trust in the (still valid, not-yet-rotated) key it's
-   currently relying on. Given this project's retention windows (`latest`
-   keeps ~8 builds/~days, `stable` ~4/~weeks — see
-   [`.github/workflows/cleanup.yml`](../.github/workflows/cleanup.yml)),
-   a couple of promotion cycles is generally sufficient.
+   currently relying on. `stable` images are promoted from `latest` images
+   that are at least two weeks old (see
+   [`promote-stable.yml`](../.github/workflows/promote-stable.yml)), and
+   old versions are kept for 28 days (see
+   [`cleanup.yml`](../.github/workflows/cleanup.yml)), so wait at least
+   about a month.
 6. **Remediate already-affected machines, if applicable.** Client-side
    verification only prevents *future* acceptance of images signed with the
    compromised key — it cannot retroactively undo an update that was already
