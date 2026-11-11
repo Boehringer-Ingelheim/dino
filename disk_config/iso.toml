@@ -6,7 +6,7 @@ rootpw --lock
 #user --name=dino --lock
 
 %post
-bootc switch --mutate-in-place --transport registry ghcr.io/boehringer-ingelheim/dino:latest
+bootc switch --mutate-in-place --transport registry ghcr.io/boehringer-ingelheim/dino:stable
 %end
 """
 

@@ -103,7 +103,7 @@ Configuration such as the image name, description, and registry organization liv
 
 ## Disk Images (ISO / QCOW2 / RAW)
 
-[`.github/workflows/build-disk.yml`](.github/workflows/build-disk.yml) builds installable disk images from the published `dino:latest` container using [bootc-image-builder](https://osbuild.org/docs/bootc/), configured via [`disk_config/disk.toml`](disk_config/disk.toml) and [`disk_config/iso.toml`](disk_config/iso.toml). It can optionally upload results to S3 (`upload-to-s3` input) or attach them as a workflow artifact. Trigger it manually from the Actions tab (`workflow_dispatch`).
+[`.github/workflows/build-disk.yml`](.github/workflows/build-disk.yml) builds a QCOW2 and an installer ISO from a published image (default `dino:stable`, selectable with the `image_tag` input) with [bootc-image-builder](https://osbuild.org/docs/bootc/), configured via [`disk_config/disk.toml`](disk_config/disk.toml) and [`disk_config/iso.toml`](disk_config/iso.toml). The installed system keeps tracking the tag the ISO was built from. Results are uploaded to S3 (`upload-to-s3` input) or attached as one workflow artifact per disk type. Trigger it manually from the Actions tab (`workflow_dispatch`); pull requests that change the disk configs build both against `latest` without uploading.
 
 See [Building and testing an installer ISO locally](docs/local-installer-testing.md) for the complete GitHub Actions, download, and Fedora/QEMU workflow.
 
