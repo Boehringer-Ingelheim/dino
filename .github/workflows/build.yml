@@ -4,11 +4,9 @@ on:
   pull_request:
     branches:
       - main
-      - stable
   push:
     branches:
       - main
-      - stable
       - feat/*
       - fix/*
     paths-ignore:
@@ -82,7 +80,6 @@ jobs:
         run: |
           BRANCH="${GITHUB_REF_NAME}"
           case "${BRANCH}" in
-            stable) STREAM_TAG="stable" ;;
             main)   STREAM_TAG="latest" ;;
             feat/*) STREAM_TAG="feat-${BRANCH#feat/}" ;;
             fix/*)  STREAM_TAG="fix-${BRANCH#fix/}" ;;
@@ -148,15 +145,17 @@ jobs:
           echo "floating_tags=${floating[*]}" >> "$GITHUB_OUTPUT"
           echo "immutable_tags=${immutable[*]}" >> "$GITHUB_OUTPUT"
 
-      # latest and stable images (and manual runs, to test the gate on a
-      # branch) only get their floating tags after the boot smoke test passed.
+      # latest images (and manual runs, to test the gate on a branch) only
+      # get their floating tags after the boot smoke test passed. `stable` is
+      # never built, it is promoted from tested latest images
+      # (promote-stable.yml).
       # feat-*/fix-* pushes publish all tags right away.
       - name: Decide on smoke test
         id: plan
         run: |
           smoke_test=false
           if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]] &&
-             [[ "${STREAM_TAG}" == "latest" || "${STREAM_TAG}" == "stable" ||
+             [[ "${STREAM_TAG}" == "latest" ||
                 "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             smoke_test=true
           fi
@@ -174,7 +173,7 @@ jobs:
             "${ALIAS_TAGS}"
 
       # These `if` statements are so that pull requests for your custom images do not make it publish any packages under your name without you knowing.
-      # The push trigger above is already scoped to main/latest/stable/feat/*/fix/*, so any non-PR event here is a branch we intend to publish.
+      # The push trigger above is already scoped to main/feat/*/fix/*, so any non-PR event here is a branch we intend to publish.
       - name: Login to GitHub Container Registry
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         if: github.event_name != 'pull_request'

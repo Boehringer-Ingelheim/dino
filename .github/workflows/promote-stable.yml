@@ -1,0 +1,249 @@
+---
+name: Promote stable
+
+# Promotes an already built and tested `latest` image to `stable` (#93).
+# No rebuild: the exact digest that ran as `latest` gets the stable tags.
+#
+#   Scheduled:  the newest latest-YYYYMMDD-<sha> image that is at least 14
+#               days old, signed and smoke tested (#111). No-op if there is
+#               none, or if it already is stable.
+#   Manual:     same, with a different soak time, or a specific source_tag:
+#               - rollback:  source_tag = a previous stable-* tag
+#               - hotfix:    soak_days = 0 (newest smoke-tested latest image)
+#
+# Besides the image tags, the git tag `stable` is moved to the image's source
+# commit, and an immutable `stable-YYYYMMDD` tag plus a GitHub Release with
+# the commit and package changelog are created.
+#
+# Optional: a GitHub App (vars.PROMOTION_APP_CLIENT_ID and
+# secrets.PROMOTION_APP_PRIVATE_KEY, contents: write) to push the tags. Tags
+# pushed with the default GITHUB_TOKEN don't trigger other workflows, and a
+# tag ruleset can then restrict `stable*` tags to the app.
+
+on:
+  schedule:
+    # Tuesdays 06:00 UTC, the day after the weekly Monday build of main.
+    - cron: "0 6 * * 2"
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: "Promote exactly this tag (e.g. stable-20261201-a1b2c3d for a rollback). Empty: pick automatically."
+        required: false
+        default: ""
+        type: string
+      soak_days:
+        description: "Automatic pick: minimum age of the latest image in days"
+        required: false
+        default: "14"
+        type: string
+      skip_smoke_check:
+        description: "Accept an image without a passed smoke test (emergencies only)"
+        required: false
+        default: false
+        type: boolean
+      dry_run:
+        description: "Only show what would be promoted"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promote-stable
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: dino
+
+jobs:
+  promote:
+    name: Promote latest to stable
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Create GitHub App token
+        id: app-token
+        if: vars.PROMOTION_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.PROMOTION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.PROMOTION_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+      # Room for the two images the package changelog compares.
+      - name: Maximize build space
+        uses: ublue-os/remove-unwanted-software@695eb75bc387dbcd9685a8e72d23439d8686cba6
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        with:
+          cosign-release: "v3.1.4"
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Select image
+        id: select
+        env:
+          REPO_OWNER: ${{ github.repository_owner }}
+          SOURCE_TAG: ${{ inputs.source_tag }}
+          SOAK_DAYS: ${{ inputs.soak_days || '14' }}
+          SKIP_SMOKE_CHECK: ${{ inputs.skip_smoke_check || false }}
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${REPO_OWNER,,}/${IMAGE_NAME,,}"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          export IMAGE
+          bash .github/scripts/select-stable-candidate.sh | tee -a "$GITHUB_OUTPUT"
+
+      - name: Summarize selection
+        env:
+          PROMOTE: ${{ steps.select.outputs.promote }}
+          REASON: ${{ steps.select.outputs.reason }}
+          SOURCE: ${{ steps.select.outputs.source_tag }}
+          DIGEST: ${{ steps.select.outputs.digest }}
+          COMMIT: ${{ steps.select.outputs.commit }}
+          SMOKE_TEST: ${{ steps.select.outputs.smoke_test }}
+          CURRENT: ${{ steps.select.outputs.current }}
+          DRY_RUN: ${{ inputs.dry_run || false }}
+        run: |
+          {
+            echo "## Stable promotion"
+            if [[ "${PROMOTE}" == "true" ]]; then
+              [[ "${DRY_RUN}" == "true" ]] && echo "**Dry run, nothing was changed.**"
+              echo
+              echo "| | |"
+              echo "| --- | --- |"
+              echo "| Source | \`${SOURCE}\` |"
+              echo "| Digest | \`${DIGEST}\` |"
+              echo "| Commit | ${COMMIT:-unknown} |"
+              echo "| Smoke test | ${SMOKE_TEST} |"
+              echo "| Previous stable | \`${CURRENT:-none}\` |"
+            else
+              echo "Nothing promoted: ${REASON}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Write release notes
+        id: notes
+        if: steps.select.outputs.promote == 'true'
+        env:
+          IMAGE: ${{ steps.select.outputs.image }}
+          SOURCE: ${{ steps.select.outputs.source_tag }}
+          DIGEST: ${{ steps.select.outputs.digest }}
+          COMMIT: ${{ steps.select.outputs.commit }}
+          SMOKE_TEST: ${{ steps.select.outputs.smoke_test }}
+          CURRENT: ${{ steps.select.outputs.current }}
+          SERVER_URL: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          DATE=$(date -u +%Y%m%d)
+
+          # Unique release tag: stable-YYYYMMDD, or stable-YYYYMMDD.N for
+          # another promotion on the same day (e.g. a rollback).
+          release_tag="stable-${DATE}"
+          n=1
+          while git rev-parse --quiet --verify "refs/tags/${release_tag}" >/dev/null; do
+            n=$((n + 1))
+            release_tag="stable-${DATE}.${n}"
+          done
+          echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
+
+          short="${COMMIT:0:7}"
+          tags="stable stable-${DATE}"
+          [[ -n "${short}" ]] && tags+=" stable-${short} stable-${DATE}-${short}"
+          echo "image_tags=${tags}" >> "$GITHUB_OUTPUT"
+
+          previous_commit=$(git rev-parse --quiet --verify "refs/tags/stable^{commit}" || true)
+
+          {
+            echo "Promoted \`${SOURCE}\` to \`stable\`."
+            echo
+            echo '```bash'
+            echo "sudo bootc switch ${IMAGE}:stable"
+            echo '```'
+            echo
+            echo "- Digest: \`${DIGEST}\`"
+            # shellcheck disable=SC2016 # literal backticks for Markdown
+            echo "- Image tags: $(sed -E 's/([^ ]+)/`\1`/g; s/ /, /g' <<<"${tags}")"
+            echo "- Smoke test: ${SMOKE_TEST}"
+            [[ -n "${COMMIT}" ]] && echo "- Commit: ${COMMIT}"
+            echo
+            echo "### Changes"
+            echo
+            if [[ -n "${previous_commit}" && -n "${COMMIT}" ]]; then
+              log=$(git log --no-merges --format='- %s (%h)' "${previous_commit}..${COMMIT}" || true)
+              echo "${log:-No commits since the previous stable release.}"
+              echo
+              echo "Full diff: ${SERVER_URL}/${REPO}/compare/${previous_commit}...${COMMIT}"
+            else
+              echo "First release from this workflow."
+            fi
+            echo
+            echo "### Packages"
+            echo
+            old_ref=""
+            [[ -n "${CURRENT}" ]] && old_ref="${IMAGE}@${CURRENT}"
+            bash .github/scripts/rpm-diff.sh "${old_ref}" "${IMAGE}@${DIGEST}" ||
+              echo "Package changelog unavailable."
+          } > release-notes.md
+          cat release-notes.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Move image tags
+        if: steps.select.outputs.promote == 'true' && inputs.dry_run != true
+        env:
+          IMAGE: ${{ steps.select.outputs.image }}
+          DIGEST: ${{ steps.select.outputs.digest }}
+          TAGS: ${{ steps.notes.outputs.image_tags }}
+        run: |
+          set -euo pipefail
+          # The signature and attestations belong to the digest, so they
+          # stay valid without re-signing.
+          for tag in ${TAGS}; do
+            skopeo copy --preserve-digests --retry-times 3 \
+              "docker://${IMAGE}@${DIGEST}" "docker://${IMAGE}:${tag}"
+            actual=$(skopeo inspect --raw "docker://${IMAGE}:${tag}" | sha256sum | cut -d' ' -f1)
+            if [[ "sha256:${actual}" != "${DIGEST}" ]]; then
+              echo "::error::${tag} points to sha256:${actual}, expected ${DIGEST}"
+              exit 1
+            fi
+            echo "${IMAGE}:${tag} -> ${DIGEST}"
+          done
+          cosign verify --key cosign.pub "${IMAGE}:stable" > /dev/null
+
+      - name: Tag commit and create release
+        if: steps.select.outputs.promote == 'true' && inputs.dry_run != true && steps.select.outputs.commit != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          COMMIT: ${{ steps.select.outputs.commit }}
+          SOURCE: ${{ steps.select.outputs.source_tag }}
+          RELEASE_TAG: ${{ steps.notes.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git tag --force stable "${COMMIT}"
+          git tag --annotate "${RELEASE_TAG}" --message "Stable release ${RELEASE_TAG} (from ${SOURCE})" "${COMMIT}"
+          git push --force origin refs/tags/stable "refs/tags/${RELEASE_TAG}"
+
+          gh release create "${RELEASE_TAG}" \
+            --verify-tag \
+            --title "Stable ${RELEASE_TAG#stable-}" \
+            --notes-file release-notes.md \
+            --latest

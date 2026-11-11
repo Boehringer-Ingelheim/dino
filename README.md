@@ -10,13 +10,13 @@ DINO is a custom [bootc](https://github.com/bootc-dev/bootc) image built on top 
 
 ## Image Streams
 
-The image is published from a single Containerfile across several branch types. Every stream builds on the same digest-pinned `ghcr.io/ublue-os/aurora-dx:stable` base from the Containerfile; CI only derives the published tag from the branch name.
+The image is built from a single Containerfile on the digest-pinned `ghcr.io/ublue-os/aurora-dx:stable` base. `stable` is not built at all: it is a `latest` image that has run for at least two weeks, promoted unchanged.
 
-| Branch | Base image | Published tag | Retention | Purpose |
-| --- | --- | --- | --- | --- |
-| `main` | `ghcr.io/ublue-os/aurora-dx:stable` (pinned) | `latest` | 28 days, at least 2 images | Integration testing |
-| `stable` | `ghcr.io/ublue-os/aurora-dx:stable` (pinned) | `stable` | 28 days, at least 2 images | Production (recommended) |
-| `feat/*`, `fix/*` | `ghcr.io/ublue-os/aurora-dx:stable` (pinned) | `feat-{name}`, `fix-{name}` | Until the branch is deleted | Feature/fix testing |
+| Tag | Comes from | Retention | Purpose |
+| --- | --- | --- | --- |
+| `latest` | builds of `main` | 28 days, at least 2 images | Integration testing |
+| `stable` | promoted `latest` image, weekly | 28 days, at least 2 images | Production (recommended) |
+| `feat-{name}`, `fix-{name}` | builds of `feat/*`, `fix/*` branches | Until the branch is deleted | Feature/fix testing |
 
 `main` also rebuilds every Monday at 04:00 UTC, so `latest` gets a new image at least weekly even without commits (this also picks up Edge, Prisma, OneDrive and Himmelblau updates).
 
@@ -45,21 +45,23 @@ Reboot to complete the switch. All published images are signed with [cosign](htt
 - [`.github/workflows/build.yml`](.github/workflows/build.yml) resolves `STREAM_TAG` from the branch name (`resolve-stream` step) and passes it into `just build`, so the same workflow file drives every stream.
 - [`.github/renovate.json5`](.github/renovate.json5) tracks `main` and auto-merges `aurora-dx` digest bumps to the Containerfile every 6 hours; each merge triggers a new build.
 - Publishing (push/tag/sign) only happens on `push` events (not on pull requests), so PRs build and validate but never publish.
-- **Boot smoke test** ([`smoke-test.yml`](.github/workflows/smoke-test.yml), [`tests/smoke/`](tests/smoke)): for `latest` and `stable` (and manual runs), CI first pushes only the SHA tags. It then installs the new image to a qcow2, boots it headless in QEMU/KVM and checks that the boot finished without unexpected failed units, Himmelblau and GDM (with its greeter) are running, the corporate fonts are installed and every signature key in `policy.json` exists. Only if that passes are the floating tags (`latest`, `latest-YYYYMMDD`) moved to the new digest, and a signed attestation records the passed test. A failing image is never served to machines tracking the stream. `feat-*`/`fix-*` pushes skip the test. Run it locally with `just smoke-test` (needs sudo and KVM).
+- **Boot smoke test** ([`smoke-test.yml`](.github/workflows/smoke-test.yml), [`tests/smoke/`](tests/smoke)): for `latest` (and manual runs), CI first pushes only the SHA tags. It then installs the new image to a qcow2, boots it headless in QEMU/KVM and checks that the boot finished without unexpected failed units, Himmelblau and GDM (with its greeter) are running, the corporate fonts are installed and every signature key in `policy.json` exists. Only if that passes are the floating tags (`latest`, `latest-YYYYMMDD`) moved to the new digest, and a signed attestation records the passed test. A failing image is never served to machines tracking the stream. `feat-*`/`fix-*` pushes skip the test. Run it locally with `just smoke-test` (needs sudo and KVM).
 
-### Branch Promotion
-
-Changes flow forward through the streams via normal merges:
+### Stable Promotion
 
 ```text
-feat/my-feature (testing) → main (latest) → stable
+feat/my-feature (feat-my-feature) → main (latest) → 14 days → stable
 ```
 
 1. Work happens on a `feat/*` or `fix/*` branch; pushing it publishes a corresponding `feat-{name}` or `fix-{name}` testing image.
-2. PR into `main` — CI builds but does not publish. Once merged, `main` publishes `dino:latest`.
-3. Promote `main → stable` (merge/PR, 2 reviewers recommended) once `latest` has proven stable — publishes `dino:stable`.
+2. PR into `main`: CI builds but does not publish. Once merged, `main` publishes `dino:latest` after the smoke test.
+3. Every Tuesday, [`promote-stable.yml`](.github/workflows/promote-stable.yml) promotes the newest `latest` image that is at least 14 days old, signed and smoke tested to `stable`. It doesn't rebuild: `stable` gets exactly the digest that ran as `latest`. The run also moves the git tag `stable` to the image's commit and creates a `stable-YYYYMMDD` tag and GitHub Release with the commit and package changelog.
 
-Because the workflow file and Containerfile are identical across branches, promoting is just a merge — no manual reconfiguration needed per branch.
+Run the workflow by hand for:
+
+- **Rollback:** `source_tag` = a previous `stable-*` tag (see the [releases](https://github.com/boehringer-ingelheim/dino/releases)).
+- **Urgent fixes:** `soak_days` = `0` promotes the newest smoke-tested `latest` image.
+- **Preview:** `dry_run` shows what would be promoted.
 
 ## What's Customized
 
@@ -116,6 +118,7 @@ See [Building and testing an installer ISO locally](docs/local-installer-testing
 | [`disk_config/`](disk_config) | bootc-image-builder configs for VM/ISO output |
 | [`.github/workflows/build.yml`](.github/workflows/build.yml) | Builds, tags, signs, and publishes per stream |
 | [`.github/workflows/smoke-test.yml`](.github/workflows/smoke-test.yml), [`tests/smoke/`](tests/smoke) | Boot smoke test that gates the floating stream tags |
+| [`.github/workflows/promote-stable.yml`](.github/workflows/promote-stable.yml) | Weekly promotion of a tested `latest` image to `stable` |
 | [`.github/workflows/build-disk.yml`](.github/workflows/build-disk.yml) | Builds installable disk images |
 | [`.github/workflows/cleanup.yml`](.github/workflows/cleanup.yml) | Prunes old GHCR versions per stream retention policy |
 | [`.github/renovate.json5`](.github/renovate.json5) | Automerges base-image digest bumps across streams |

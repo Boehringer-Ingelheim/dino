@@ -106,6 +106,9 @@ build $target_image=image_name $tag=default_tag $base_image="":
     LABELS=()
     if [[ -z "$(git status -s)" ]]; then
         GIT_SHA=$(git rev-parse --short HEAD)
+        # Overrides the revision label inherited from the base image; the
+        # stable promotion uses it to find an image's source commit.
+        LABELS+=("--label" "org.opencontainers.image.revision=$(git rev-parse HEAD)")
         LABELS+=("--label" "io.artifacthub.package.readme-url=https://raw.githubusercontent.com/{{ repo_organization }}/{{ image_name }}/${GIT_SHA}/README.md")
         LABELS+=("--label" "org.opencontainers.image.documentation=https://raw.githubusercontent.com/{{ repo_organization }}/{{ image_name }}/${GIT_SHA}/README.md")
         LABELS+=("--label" "org.opencontainers.image.source=https://github.com/{{ repo_organization }}/{{ image_name }}/blob/${GIT_SHA}/Containerfile")
