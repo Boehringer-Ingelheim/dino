@@ -1,6 +1,15 @@
 ---
 name: Build disk images
 
+# Builds a qcow2 VM image and an Anaconda installer ISO from a published DINO
+# image with bootc-image-builder, the same tool `just build-qcow2`/`build-iso`
+# and the smoke test use:
+#   qcow2         disk_config/disk.toml
+#   anaconda-iso  disk_config/iso.toml (kickstart: locked root, no local user,
+#                 installed system tracks the built tag)
+# Pull requests that touch these files build both against `latest` but don't
+# upload anything.
+
 on:
   workflow_dispatch:
     inputs:
@@ -16,17 +25,17 @@ on:
           - amd64
           - arm64
       image_tag:
-        description: "Published image tag to build"
+        description: "Published image tag to build (the installed system tracks this tag)"
         required: true
-        default: latest
+        default: stable
         type: string
   pull_request:
     branches:
       - main
     paths:
-      - "./disk_config/disk.toml"
-      - "./disk_config/iso.toml"
-      - "./.github/workflows/build-disk.yml"
+      - "disk_config/disk.toml"
+      - "disk_config/iso.toml"
+      - ".github/workflows/build-disk.yml"
 
 permissions:
   contents: read
@@ -34,7 +43,9 @@ permissions:
 env:
   IMAGE_NAME: ${{ github.event.repository.name }} # output of build.yml, keep in sync
   IMAGE_REGISTRY: "ghcr.io/${{ github.repository_owner }}" # do not edit
-  DEFAULT_TAG: ${{ inputs.image_tag || 'latest' }}
+  # Pull requests test the disk configs against the newest image.
+  IMAGE_TAG: ${{ inputs.image_tag || 'latest' }}
+  PLATFORM: ${{ inputs.platform || 'amd64' }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
@@ -43,15 +54,18 @@ concurrency:
 jobs:
   build:
     name: Build disk images
-    runs-on: ${{ inputs.platform == 'amd64' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
+    runs-on: ${{ inputs.platform == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     strategy:
       fail-fast: false
       matrix:
-        disk-type: ["qcow2", "anaconda-iso"]
+        include:
+          - disk-type: qcow2
+            config: disk_config/disk.toml
+          - disk-type: anaconda-iso
+            config: disk_config/iso.toml
     permissions:
       contents: read
       packages: read
-      id-token: write
 
     steps:
       - name: Install dependencies
@@ -71,24 +85,63 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Build disk images
-        id: build
-        uses: osbuild/image-builder-action@a56f95dd77327e604a4f4d9fc06a9641313fda36 # main
-        with:
-          image_type: ${{ matrix.disk-type == 'anaconda-iso' && 'bootc-generic-iso' || 'qcow2' }}
-          bootc_ref: ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.DEFAULT_TAG }}
-          bootc_installer_payload_ref: ${{ matrix.disk-type == 'anaconda-iso' && format('{0}/{1}:{2}', env.IMAGE_REGISTRY, env.IMAGE_NAME, env.DEFAULT_TAG) || '' }}
-          bootc_default_fs: btrfs
+      - name: Prepare build
+        id: prepare
+        env:
+          CONFIG: ${{ matrix.config }}
+          DISK_TYPE: ${{ matrix.disk-type }}
+        run: |
+          set -euo pipefail
+          image="${IMAGE_REGISTRY,,}/${IMAGE_NAME,,}"
+          {
+            echo "image=${image}"
+            echo "bib_image=$(sed -n 's/^BIB_IMAGE="\(.*\)"$/\1/p' image-template.env)"
+            echo "artifact=${IMAGE_NAME,,}-${IMAGE_TAG}-${DISK_TYPE}-${PLATFORM}"
+          } >> "$GITHUB_OUTPUT"
+
+          # The installed system should keep tracking the tag it was built
+          # from, so a feat-* ISO installs a system that follows feat-*.
+          mkdir -p output
+          sed -E "s#(${image}):[A-Za-z0-9._-]+#\1:${IMAGE_TAG}#g" "${CONFIG}" > config.toml
+          grep -n 'bootc switch' config.toml || true
+
+      - name: Pull image
+        env:
+          IMAGE: ${{ steps.prepare.outputs.image }}
+        run: sudo podman pull "${IMAGE}:${IMAGE_TAG}"
+
+      - name: Build disk image
+        env:
+          IMAGE: ${{ steps.prepare.outputs.image }}
+          BIB_IMAGE: ${{ steps.prepare.outputs.bib_image }}
+          DISK_TYPE: ${{ matrix.disk-type }}
+        run: |
+          set -euo pipefail
+          sudo podman run \
+            --rm \
+            --privileged \
+            --pull=newer \
+            --security-opt label=type:unconfined_t \
+            -v "${PWD}/config.toml:/config.toml:ro" \
+            -v "${PWD}/output:/output" \
+            -v /var/lib/containers/storage:/var/lib/containers/storage \
+            "${BIB_IMAGE}" \
+            --type "${DISK_TYPE}" \
+            --rootfs btrfs \
+            --use-librepo=True \
+            "${IMAGE}:${IMAGE_TAG}"
+          sudo chown -R "$(id -u):$(id -g)" output
+          (cd output && find . -type f \( -name '*.iso' -o -name '*.qcow2' \) -exec sha256sum {} + | tee SHA256SUMS)
 
       - name: Upload disk images and Checksum to Job Artifacts
         if: inputs.upload-to-s3 != true && github.event_name != 'pull_request'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
+          name: ${{ steps.prepare.outputs.artifact }}
           path: output
           if-no-files-found: error
           retention-days: 0
           compression-level: 0
-          overwrite: true
 
       - name: Upload to S3
         if: inputs.upload-to-s3 == true && github.event_name != 'pull_request'
@@ -100,8 +153,9 @@ jobs:
           RCLONE_CONFIG_S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
           RCLONE_CONFIG_S3_REGION: ${{ secrets.S3_REGION }}
           RCLONE_CONFIG_S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+          S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
           SOURCE_DIR: output
         run: |
           sudo apt-get update
           sudo apt-get install -y rclone
-          rclone copy $SOURCE_DIR S3:${{ secrets.S3_BUCKET_NAME }}
+          rclone copy "$SOURCE_DIR" "S3:${S3_BUCKET_NAME}"

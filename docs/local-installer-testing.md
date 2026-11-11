@@ -1,8 +1,10 @@
 # Building and testing an installer ISO locally
 
-This guide builds the installer from the latest `main` image with GitHub Actions,
-downloads it, and tests an installation in a local QEMU/KVM virtual machine on
-Fedora.
+This guide builds the installer with GitHub Actions, downloads it, and tests an
+installation in a local QEMU/KVM virtual machine on Fedora. The ISO installs
+`dino:stable` by default; pass `-f image_tag=latest` (or a `feat-*`/`fix-*`
+tag) to test another stream. The installed system keeps tracking the tag the
+ISO was built from.
 
 ## Prerequisites
 
@@ -37,6 +39,7 @@ gh workflow run build-disk.yml \
   --repo Boehringer-Ingelheim/dino \
   --ref main \
   -f platform=amd64 \
+  -f image_tag=stable \
   -f upload-to-s3=false
 ```
 
@@ -59,50 +62,24 @@ gh run watch "$RUN_ID" \
   --interval 30
 ```
 
-### Preserve the ISO artifact
-
-The workflow currently builds both QCOW2 and Anaconda ISO matrix jobs. Both jobs
-upload an artifact named `artifact` with `overwrite: true`, so whichever job
-uploads last replaces the other artifact.
-
-After the first run finishes, find the Anaconda ISO job ID:
-
-```bash
-ISO_JOB_ID="$(
-  gh run view "$RUN_ID" \
-    --repo Boehringer-Ingelheim/dino \
-    --json jobs \
-    --jq '.jobs[] | select(.name | contains("anaconda-iso")) | .databaseId'
-)"
-```
-
-Rerun only that job so the surviving artifact is the ISO:
-
-```bash
-gh run rerun "$RUN_ID" \
-  --repo Boehringer-Ingelheim/dino \
-  --job "$ISO_JOB_ID"
-
-gh run watch "$RUN_ID" \
-  --repo Boehringer-Ingelheim/dino \
-  --exit-status \
-  --interval 30
-```
-
 ## Download the ISO
+
+Each matrix job uploads its own artifact, named
+`dino-<tag>-<disk type>-<platform>`:
 
 ```bash
 mkdir -p output/main-iso
 
 gh run download "$RUN_ID" \
   --repo Boehringer-Ingelheim/dino \
-  --name artifact \
+  --name dino-stable-anaconda-iso-amd64 \
   --dir output/main-iso
 
 ISO="$(find "$PWD/output/main-iso" -type f -name '*.iso' -print -quit)"
 test -n "$ISO" || { echo "ISO not found"; exit 1; }
 ISO="$(realpath "$ISO")"
 echo "$ISO"
+(cd output/main-iso && sha256sum -c SHA256SUMS)
 ```
 
 The Actions artifact is several gigabytes, so the download can take some time.
