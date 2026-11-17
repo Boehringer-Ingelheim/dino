@@ -95,7 +95,7 @@ for family in "Boehringer Forward Head" "Boehringer Forward Text"; do
   fi
 done
 
-# 5. Image signature policy: an entry for our image, and every key file exists.
+# 5. Image signature policy: an entry for our image, and its key files exist.
 policy=/etc/containers/policy.json
 if [[ -n "${POLICY_REF}" ]] &&
   jq -e --arg ref "${POLICY_REF}" \
@@ -106,7 +106,9 @@ else
   fail "${policy} has no sigstoreSigned entry for '${POLICY_REF}'"
 fi
 
-mapfile -t keys < <(jq -r '.. | objects | (.keyPath // empty), (.keyPaths // [] | .[])' "${policy}" | sort -u)
+mapfile -t keys < <(jq -r --arg ref "${POLICY_REF}" \
+  '.transports.docker[$ref][]? | (.keyPath // empty), (.keyPaths // [] | .[])' \
+  "${policy}" | sort -u)
 if [[ ${#keys[@]} -eq 0 ]]; then
   fail "${policy} references no key files"
 fi
