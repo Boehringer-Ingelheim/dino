@@ -95,7 +95,20 @@ for family in "Boehringer Forward Head" "Boehringer Forward Text"; do
   fi
 done
 
-# 5. Image signature policy: an entry for our image, and every key file exists.
+# 5. OneDrive user service is enabled globally.
+if [[ -f /usr/lib/systemd/user/onedrive.service && -L /etc/systemd/user/default.target.wants/onedrive.service ]]; then
+  pass "OneDrive user service is enabled globally"
+else
+  fail "OneDrive user service or global enablement is missing"
+fi
+
+if grep -Eq '^[[:space:]]*use_intune_sso[[:space:]]*=[[:space:]]*"true"' /etc/onedrive/config; then
+  pass "system OneDrive config defaults to Intune SSO"
+else
+  fail "OneDrive Intune SSO default is missing from /etc/onedrive/config"
+fi
+
+# 6. Image signature policy: an entry for our image, and every key file exists.
 policy=/etc/containers/policy.json
 if [[ -n "${POLICY_REF}" ]] &&
   jq -e --arg ref "${POLICY_REF}" \
