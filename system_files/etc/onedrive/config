@@ -1,1 +1,3 @@
 use_intune_sso = "true"
+use_recycle_bin = "true"
+display_manager_integration = "true"
