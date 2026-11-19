@@ -191,11 +191,17 @@ allowed=$(grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' \
   "${script_dir}/allowed-failed-units.txt" | awk '{print $1}' || true)
 
 status=0
+remote_check_dir="/tmp/dino-smoke-checks-${BASHPID}-${RANDOM}"
+vm_ssh mkdir -p "${remote_check_dir}"
+tar -C "${script_dir}" -cf - checks.sh checks.d |
+  vm_ssh tar -xf - -C "${remote_check_dir}"
 {
   printf 'ALLOWED_FAILED_UNITS=%q\n' "${allowed}"
   printf 'POLICY_REF=%q\n' "${POLICY_REF}"
-  cat "${script_dir}/checks.sh"
+  printf 'cd %q\n' "${remote_check_dir}"
+  printf 'bash checks.sh\n'
 } | vm_ssh bash -s || status=$?
+vm_ssh rm -rf -- "${remote_check_dir}" || true
 
 # Keep the journal for debugging, whatever the result.
 vm_ssh journalctl --boot --no-pager >"${WORK_DIR}/journal.log" 2>&1 || true
