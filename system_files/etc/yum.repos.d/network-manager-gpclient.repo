@@ -1,0 +1,8 @@
+[network-manager-gpclient]
+name=GlobalProtect NetworkManager plugin (Fedora $releasever)
+baseurl=https://wmp.github.io/GlobalProtect-SAML-NetworkManager/rpm/fedora$releasever/$basearch
+enabled=1
+skip_if_unavailable=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://wmp.github.io/GlobalProtect-SAML-NetworkManager/rpm/RPM-GPG-KEY-gpclient

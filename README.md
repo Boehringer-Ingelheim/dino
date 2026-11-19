@@ -18,7 +18,7 @@ The image is built from a single Containerfile on the digest-pinned `ghcr.io/ubl
 | `stable` | promoted `latest` image, weekly | 28 days, at least 2 images | Production (recommended) |
 | `feat-{name}`, `fix-{name}` | builds of `feat/*`, `fix/*` branches | Until the branch is deleted | Feature/fix testing |
 
-`main` also rebuilds every Monday at 04:00 UTC, so `latest` gets a new image at least weekly even without commits (this also picks up Edge, Prisma, OneDrive and Himmelblau updates).
+`main` also rebuilds every Monday at 04:00 UTC, so `latest` gets a new image at least weekly even without commits (this also picks up Edge, Prisma, OneDrive, GlobalProtect and Himmelblau updates).
 
 Each build also gets dated/SHA tags (e.g. `stable-20260703-a1b2c3d`) for pinning/rollback. Old versions are pruned nightly by [`.github/workflows/cleanup.yml`](.github/workflows/cleanup.yml) according to the retention column above; the image currently tagged `latest` or `stable` is never pruned, and each pruned image's cosign signature and attestation are removed with it. Untagged manifests and `feat-*`/`fix-*` versions whose branch no longer exists are removed as well.
 
@@ -70,6 +70,7 @@ Run the workflow by hand for:
 | Image build tasks | [`build.sh`](build_files/build.sh), [`tasks/`](build_files/tasks) | Copies [`system_files/`](system_files) into the image, then runs numbered task scripts in order. |
 | Image signature trust | [`00-configure-image-signing.sh`](build_files/tasks/00-configure-image-signing.sh), [`container public keys`](system_files/usr/lib/pki/containers) | Adds DINO's signing keys to the container policy so signed DINO images can be verified. |
 | Browsers and cloud storage | [`01-install-edge-onedrive.sh`](build_files/tasks/01-install-edge-onedrive.sh), [`02-install-paloalto-browser.sh`](build_files/tasks/02-install-paloalto-browser.sh), [`Prisma Browser RPM repo`](system_files/etc/yum.repos.d/prisma-access-browser.repo) | Installs Microsoft Edge as the default browser, Palo Alto Prisma Access Browser as an alternative, and OneDrive. |
+| GlobalProtect VPN | [`04-install-globalprotect-networkmanager.sh`](build_files/tasks/04-install-globalprotect-networkmanager.sh), [`GlobalProtect RPM repo`](system_files/etc/yum.repos.d/network-manager-gpclient.repo) | Installs the GlobalProtect NetworkManager service and KDE Plasma 6 connection editor. |
 | Display manager | [`98-switch-plasmalogin-for-gdm.sh`](build_files/tasks/98-switch-plasmalogin-for-gdm.sh) | Replaces Plasma Login with GDM. |
 | Entra ID sign-in | [`99-install-himmelblau.sh`](build_files/tasks/99-install-himmelblau.sh), [`himmelblau-brew-ownership`](system_files/usr/libexec/himmelblau/logon.d/himmelblau-brew-ownership) | Installs and configures Himmelblau; on first login, assigns `/home/linuxbrew` to the authenticated user's runtime UID/GID. |
 | Extra `just` commands | [`60-custom.just`](system_files/usr/share/ublue-os/just/60-custom.just) | Imports optional recipes for `aws-smp`, `onedrive`, `openshift-client`, and `ssh-key-agent`. |
